@@ -3,108 +3,289 @@ package com.example.demoreadexcelfile;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FilenameFilter;
 import java.util.ArrayList;
 import java.util.List;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.AlertDialog.Builder;
+import android.app.Dialog;
 import android.content.ContentValues;
-import android.database.Cursor;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
-import android.os.Parcelable;
+import android.os.Environment;
 import android.util.Log;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.ListView;
+import android.widget.ListAdapter;
+import android.widget.TextView;
 import android.widget.Toast;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity{
+	
+	Button upload, show;
+	TextView selected_text;
+	// Stores names of traversed directories
+	ArrayList<String> str = new ArrayList<String>();
 
-	Button read;
-	ListView listView;
-	ItemArrayAdapter itemArrayAdapter;
-	ItemAdapter itemadapter;
+	// Check if the first level of the directory structure is the one showing
+	private Boolean firstLvl = true;
+
+	private static final String TAG = "F_PATH";
+	private Item[] fileList;
+	private File path = new File(Environment.getExternalStorageDirectory() + "");
+	private String chosenFile;
+	private static final int DIALOG_LOAD_FILE = 1000;
+	ListAdapter adapter;
+	
 	DBHelper helper;
 	SQLiteDatabase db = null;
-	List<ContactsBean> contactList = new ArrayList<ContactsBean>();
+	File selected_path;
 	
-	@Override
-	protected void onCreate(Bundle savedInstanceState) {
-		super.onCreate(savedInstanceState);
-		setContentView(R.layout.activity_main);
-		
-		helper = new DBHelper(MainActivity.this);
-		db = helper.getWritableDatabase();
-		
-		listView = (ListView) findViewById(R.id.list);
-        itemArrayAdapter = new ItemArrayAdapter(getApplicationContext(), R.layout.item_layout);
-
-        Parcelable state = listView.onSaveInstanceState();
-        listView.setAdapter(itemArrayAdapter);
-        listView.onRestoreInstanceState(state);
-
-        File file = new File("/sdcard/demo.csv");
-        Log.d("File :", file+"");
-        FileInputStream myInput;
-		try {
-			myInput = new FileInputStream(file);
-	        CSVFile csvFile = new CSVFile(/*inputStream*/myInput);       
-	        List scoreList = csvFile.read();
-	 
-	        for(Object object : scoreList ) {
-	        	String[] scoredata = (String[]) object;
-	        	
-	            //itemArrayAdapter.add(scoredata);
-	            Log.d("Name :", scoredata[0]+"");
-	            Log.d("Number :", scoredata[1]+"");
-	            
-	            ContentValues values = new ContentValues();
-				values.put(DBHelper.CONTACT_NAME, scoredata[0]);
-				values.put(DBHelper.CONTACT_NUMBER, scoredata[1]);
-				
-				//db.insert(DBHelper.TABLE_CONTACT_DETAIL, null, values);
-				db.insertWithOnConflict(DBHelper.TABLE_CONTACT_DETAIL, null, values, SQLiteDatabase.CONFLICT_REPLACE);
-
-				Toast.makeText(MainActivity.this, "Contacts Added Successfully",1000).show();
-	        }
-	        /*for(String[] scoreData : scoreList ) {
-        		itemArrayAdapter.add(scoreData);
-    		}*/
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
+		@Override
+		protected void onCreate(Bundle savedInstanceState) {
+			
+			super.onCreate(savedInstanceState);
+			setContentView(R.layout.homescreen);
+			
+			helper = new DBHelper(HomeScreen.this);
+			db = helper.getWritableDatabase();
+			
+			upload = (Button) findViewById(R.id.upload);
+			show = (Button) findViewById(R.id.show);
+			selected_text = (TextView) findViewById(R.id.selected_file);
+			
+			upload.setOnClickListener(uploadListener);
+			show.setOnClickListener(showListener);
 		}
+	
+	OnClickListener uploadListener = new OnClickListener() {
 		
-		contactList = getAllItems();
-		itemadapter = new ItemAdapter(MainActivity.this, contactList);
-		listView.setAdapter(itemadapter);
+		@Override
+		public void onClick(View v) {
+			
+			int PICKFILE_RESULT_CODE=1;            
+			//Intent intent = new Intent(Intent.ACTION_GET_CONTENT);                 
+			//intent.setType("file/*");              
+			//startActivityForResult(intent,PICKFILE_RESULT_CODE);
+			
+			loadFileList();
+			showDialog(DIALOG_LOAD_FILE);
+			Log.d(TAG, path.getAbsolutePath());
+		}
+	};
+	
+	OnClickListener showListener = new OnClickListener() {
+		
+		@Override
+		public void onClick(View v) {
+			startActivity(new Intent(HomeScreen.this, DisplayList.class));
+		}
+	}; 
+
+	private void loadFileList() {
+		try {
+			path.mkdirs();
+		} catch (SecurityException e) {
+			Log.e(TAG, "unable to write on the sd card ");
+		}
+
+		// Checks whether path exists
+		if (path.exists()) {
+			FilenameFilter filter = new FilenameFilter() {
+				@Override
+				public boolean accept(File dir, String filename) {
+					File sel = new File(dir, filename);
+					Log.e("Sel :", sel+"");
+					// Filters based on whether the file is hidden or not
+					return (sel.isFile() || sel.isDirectory())
+							&& !sel.isHidden();
+
+				}
+			};
+
+			String[] fList = path.list(filter);
+			fileList = new Item[fList.length];
+			for (int i = 0; i < fList.length; i++) {
+				fileList[i] = new Item(fList[i], R.drawable.file_icon);
+
+				// Convert into file path
+				File sel = new File(path, fList[i]);
+				Log.e("Sel2:", sel+"");
+
+				// Set drawables
+				if (sel.isDirectory()) {
+					fileList[i].icon = R.drawable.directory_icon;
+					Log.d("DIRECTORY", fileList[i].file);
+				} else {
+					Log.d("FILE", fileList[i].file);
+				}
+			}
+
+			if (!firstLvl) {
+				Item temp[] = new Item[fileList.length + 1];
+				for (int i = 0; i < fileList.length; i++) {
+					temp[i + 1] = fileList[i];
+				}
+				temp[0] = new Item("Up", R.drawable.directory_up);
+				fileList = temp;
+			}
+		} else {
+			Log.e(TAG, "path does not exist");
+		}
+
+		adapter = new ArrayAdapter<Item>(this,
+				android.R.layout.select_dialog_item, android.R.id.text1,
+				fileList) {
+			@Override
+			public View getView(int position, View convertView, ViewGroup parent) {
+				// creates view
+				View view = super.getView(position, convertView, parent);
+				TextView textView = (TextView) view
+						.findViewById(android.R.id.text1);
+
+				// put the image on the text view
+				textView.setCompoundDrawablesWithIntrinsicBounds(
+						fileList[position].icon, 0, 0, 0);
+
+				// add margin between image and text (support various screen
+				// densities)
+				int dp5 = (int) (5 * getResources().getDisplayMetrics().density + 0.5f);
+				textView.setCompoundDrawablePadding(dp5);
+
+				return view;
+			}
+		};
 	}
 	
-	public List<ContactsBean> getAllItems(){
-			
-			List<ContactsBean> contactList = new ArrayList<ContactsBean>();
-			String selectQuery = "SELECT * FROM " + DBHelper.TABLE_CONTACT_DETAIL+ " GROUP BY contact_name";
-			
-			Cursor cursor = db.rawQuery(selectQuery, null);
-			if (cursor.moveToFirst()) {
-				do {
-					ContactsBean contact = new ContactsBean();
-					Log.e("Count :", cursor.getInt(0)+"");
+	private class Item {
+		public String file;
+		public int icon;
+
+		public Item(String file, Integer icon) {
+			this.file = file;
+			this.icon = icon;
+		}
+
+		@Override
+		public String toString() {
+			return file;
+		}
+	}
+
+	@Override
+	protected Dialog onCreateDialog(int id) {
+		Dialog dialog = null;
+		AlertDialog.Builder builder = new Builder(this);
+
+		if (fileList == null) {
+			Log.e(TAG, "No files loaded");
+			dialog = builder.create();
+			return dialog;
+		}
+
+		switch (id) {
+		case DIALOG_LOAD_FILE:
+			builder.setTitle("Choose your file");
+			builder.setAdapter(adapter, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					chosenFile = fileList[which].file;
+					File sel = new File(path + "/" + chosenFile);
+					Log.e("Sel3-Selected Path:", sel+"");
+					selected_path = new File(sel.getAbsolutePath());
+					selected_text.setText("Your path is :"+sel);
 					
-					//0 for getCount-Total Count
-					//1 for Name
-					//2 for Number
+					//Store csv file data to database
+					File file = new File(selected_path.getAbsolutePath());
+			        Log.d("File - Selected Path :", file+"");
+			        FileInputStream myInput;
+					try {
+						myInput = new FileInputStream(file);
+				        CSVFile csvFile = new CSVFile(/*inputStream*/myInput);       
+				        List scoreList = csvFile.read();
+				 
+				        for(Object object : scoreList ) {
+				        	String[] scoredata = (String[]) object;
+				        	
+				            Log.d("Name :", scoredata[0]+"");
+				            Log.d("Number :", scoredata[1]+"");
+				            
+				            ContentValues values = new ContentValues();
+							values.put(DBHelper.CONTACT_NAME, scoredata[0]);
+							values.put(DBHelper.CONTACT_NUMBER, scoredata[1]);
+							
+							//db.insert(DBHelper.TABLE_CONTACT_DETAIL, null, values);
+							db.insertWithOnConflict(DBHelper.TABLE_CONTACT_DETAIL, null, values, SQLiteDatabase.CONFLICT_REPLACE);
+
+							Toast.makeText(HomeScreen.this, "Contacts Added Successfully",1000).show();
+				        }
+				        /*for(String[] scoreData : scoreList ) {
+			        		itemArrayAdapter.add(scoreData);
+			    		}*/
+					} catch (FileNotFoundException e) {
+						e.printStackTrace();
+					}
+					////////
 					
-					//contact.setCount(cursor.getInt(0));
-					contact.setName(cursor.getString(1));
-					contact.setNumber(cursor.getString(2));
-	
-					Log.v("Contact Count :", cursor.getInt(0)+"");
-					Log.v("Name - DB :", cursor.getString(1));
-					Log.v("Number - DB :", cursor.getString(2));
-					
-					contactList.add(contact);
-				} while (cursor.moveToNext());
-				Log.d("Contact List :", contactList+"");
-			}
-			return contactList;
-		}	
+					if (sel.isDirectory()) {
+						firstLvl = false;
+
+						// Adds chosen directory to list
+						str.add(chosenFile);
+						fileList = null;
+						path = new File(sel + "");
+
+						loadFileList();
+
+						removeDialog(DIALOG_LOAD_FILE);
+						showDialog(DIALOG_LOAD_FILE);
+						Log.d(TAG, path.getAbsolutePath());
+						Log.e("Selection Path:", path.getAbsolutePath());
+
+					}
+
+					// Checks if 'up' was clicked
+					else if (chosenFile.equalsIgnoreCase("up") && !sel.exists()) {
+
+						// present directory removed from list
+						String s = str.remove(str.size() - 1);
+
+						// path modified to exclude present directory
+						path = new File(path.toString().substring(0,
+								path.toString().lastIndexOf(s)));
+						Log.e("Path:", path+"");
+						fileList = null;
+
+						// if there are no more directories in the list, then
+						// its the first level
+						if (str.isEmpty()) {
+							firstLvl = true;
+						}
+						loadFileList();
+
+						removeDialog(DIALOG_LOAD_FILE);
+						showDialog(DIALOG_LOAD_FILE);
+						Log.d(TAG, path.getAbsolutePath());
+						Log.e("Selection Path:", path.getAbsolutePath());
+
+					}
+					// File picked
+					else {
+						// Perform action with file picked
+					}
+
+				}
+			});
+			break;
+		}
+		dialog = builder.show();
+		return dialog;
+	}
 }
